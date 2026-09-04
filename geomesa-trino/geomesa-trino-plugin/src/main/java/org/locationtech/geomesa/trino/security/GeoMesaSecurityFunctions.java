@@ -76,10 +76,37 @@ public final class GeoMesaSecurityFunctions {
     }
 
     private static Boolean evaluate(Decision decision) {
+        String auths = decision.auths();
+        String visibility = decision.visibility();
+
+        // FAST-PATH 0: Empty/null visibility is unrestricted (common in public/unrestricted tables)
+        if (visibility == null || visibility.isEmpty()) {
+            return true;
+        }
+
+        // FAST-PATH 1: Single token match (most common pattern)
+        // Conditions: no comma in auths (single token), no operators in visibility
+        if (!auths.contains(",") && !visibility.contains("&") && !visibility.contains("|")) {
+            return auths.equals(visibility);
+        }
+
+        // FAST-PATH 2: Simple OR expression with single auth (hierarchical visibility)
+        // Conditions: single auth token, only OR operators, no AND operators
+        if (!auths.contains(",") && visibility.contains("|") && !visibility.contains("&")) {
+            String[] options = visibility.split("\\|");
+            for (String option : options) {
+                if (option.equals(auths)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Fall back to standard AccessEvaluator for complex expressions
         try {
             // getUnchecked rewraps loader failures as UncheckedExecutionException
             // (a RuntimeException), so an invalid auth string fails closed too.
-            return EVALUATORS.getUnchecked(decision.auths()).canAccess(decision.visibility());
+            return EVALUATORS.getUnchecked(auths).canAccess(visibility);
         } catch (RuntimeException e) {
             return Boolean.FALSE;  // fail closed on invalid expressions
         }

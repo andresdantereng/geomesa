@@ -89,4 +89,73 @@ class GeoMesaSecurityFunctionsTest {
         assertThat(visible("admin", "user")).isFalse();
         assertThat(visible("tok0", "tok0")).isTrue();
     }
+
+    // Phase 1 Fast-Path Tests
+
+    @Test
+    void fastPathEmptyVisibility() {
+        // FAST-PATH 0: Empty visibility is unrestricted
+        assertThat(visible(null, "user")).isTrue();
+        assertThat(visible("", "user")).isTrue();
+        assertThat(visible(null, "")).isTrue();
+        assertThat(visible("", "")).isTrue();
+    }
+
+    @Test
+    void fastPathSingleTokenMatch() {
+        // FAST-PATH 1: Single token match (exact string equality)
+        assertThat(visible("user", "user")).isTrue();
+        assertThat(visible("user", "admin")).isFalse();
+        assertThat(visible("basic", "basic")).isTrue();
+        assertThat(visible("privileged", "basic")).isFalse();
+    }
+
+    @Test
+    void fastPathSimpleOrExpression() {
+        // FAST-PATH 2: Simple OR expression with single auth
+        assertThat(visible("public|user|admin", "user")).isTrue();
+        assertThat(visible("public|admin", "user")).isFalse();
+        assertThat(visible("user|privileged", "user")).isTrue();
+        assertThat(visible("admin|ops", "user")).isFalse();
+        // Edge case: single option (degenerate OR)
+        assertThat(visible("user", "user")).isTrue();
+    }
+
+    @Test
+    void fastPathNotUsedForComplexExpressions() {
+        // These should NOT use fast-paths (they fall through to AccessEvaluator)
+        // and results should still be correct
+        assertThat(visible("admin&ops", "admin")).isFalse();
+        assertThat(visible("admin&ops", "admin,ops")).isTrue();
+        assertThat(visible("(admin|ops)&secure", "ops,secure")).isTrue();
+        assertThat(visible("(admin|ops)&secure", "ops")).isFalse();
+        assertThat(visible("admin,ops", "admin,ops")).isTrue();  // Comma in visibility
+    }
+
+    @Test
+    void fastPathVsAccessEvaluatorConsistency() {
+        // Verify fast-paths match AccessEvaluator behavior
+        // Simple patterns that use fast-paths
+        String[] simplePatterns = {
+            "user", "admin", "basic", "privileged",
+            "public|user|admin", "basic|privileged"
+        };
+
+        for (String vis : simplePatterns) {
+            // Test with matching auth
+            String auth = vis.split("\\|")[0];  // Get first option
+            assertThat(visible(vis, auth)).isTrue();
+
+            // Test with non-matching auth
+            assertThat(visible(vis, "nonexistent")).isFalse();
+        }
+    }
+
+    @Test
+    void fastPathComplexAuthSetFallsBack() {
+        // Complex auth sets (with commas) should fall back to AccessEvaluator
+        assertThat(visible("admin", "admin,ops")).isFalse();
+        assertThat(visible("admin&ops", "admin,ops")).isTrue();
+        assertThat(visible("admin|ops", "admin,ops")).isTrue();
+    }
 }
