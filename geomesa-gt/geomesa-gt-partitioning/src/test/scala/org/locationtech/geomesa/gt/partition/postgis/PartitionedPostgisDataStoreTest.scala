@@ -238,11 +238,13 @@ class PartitionedPostgisDataStoreTest extends SpecificationWithJUnit with Before
             Iterator.continually(rs).takeWhile(_.next()).map(_.getString("COLUMN_NAME")).toList must
               contain(PartitionedPostgisDialect.VisCol)
           }
-          // and that the view filters on it
+          // and that the view filters on it through the sidecar, with a row-wise fallback for oversized sidecars
           WithClose(cx.prepareStatement(s"""select pg_get_viewdef('${this.schema}."${sft.getTypeName}"'::regclass, true);""")) { st =>
             WithClose(st.executeQuery()) { rs =>
               rs.next() must beTrue
-              rs.getString(1).toLowerCase(Locale.US).split("pg_vis") must haveLength(5) // 4 tables
+              val view = rs.getString(1).toLowerCase(Locale.US)
+              view must contain(s"${sft.getTypeName}_vis_values")
+              view.split("pg_vis") must haveLength(14) // one sidecar decision plus three predicates for each of four tables
             }
           }
         }
@@ -265,6 +267,11 @@ class PartitionedPostgisDataStoreTest extends SpecificationWithJUnit with Before
           // validate adding through the feature store
           ds.getFeatureSource(sft.getTypeName).addFeatures(new ListFeatureCollection(sft, features.drop(5).asJava))
           tx.commit()
+        }
+
+        val typeInfo = TypeInfo(this.schema, sft)
+        WithClose(ds.getConnection(Transaction.AUTO_COMMIT)) { cx =>
+          count(cx, typeInfo.tables.visibilityValues) mustEqual visibilities.distinct.length
         }
 
         def runQueries(): MatchResult[_] = {
@@ -296,7 +303,6 @@ class PartitionedPostgisDataStoreTest extends SpecificationWithJUnit with Before
         runQueries()
 
         // verify vis still work through maintenance scripts
-        val typeInfo = TypeInfo(this.schema, sft)
         WithClose(ds.getConnection(Transaction.AUTO_COMMIT)) { cx =>
           // everything starts in the write ahead log
           count(cx, typeInfo.tables.writeAhead) mustEqual 10

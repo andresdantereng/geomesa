@@ -41,15 +41,17 @@ class PartionedPostgisDialectTest extends SpecificationWithJUnit with Mockito {
       }
     }
 
-    "add a pg_vis predicate to each main view branch when a _vis column is present" in {
+    "add sidecar-backed visibility filtering to each main view branch when a _vis column is present" in {
       val sft = SimpleFeatureTypes.createType("vistest", s"name:String,dtg:Date,*geom:Point:srid=4326,$VisCol:String")
       val info = TypeInfo("public", sft)
       info.cols.vis must beSome
       val sqlCapture = new SqlCapture()
       MainView.create(info)(sqlCapture)
-      // one predicate per union branch (write ahead, wa partitions, main partitions, spill)
-      sqlCapture.sql.split("pg_vis").length - 1 mustEqual 4
-      sqlCapture.sql must contain(s"""pg_vis(${escape(VisCol)}, (SELECT string_to_array(current_setting('geomesa.auths', true), ',')))""")
+      sqlCapture.sql must contain("sidecar_count")
+      sqlCapture.sql must contain("allowed_values")
+      sqlCapture.sql must contain(info.tables.visibilityValues.name.qualified)
+      // four union branches retain a row-wise fallback predicate for cap-exceeded sidecars
+      sqlCapture.sql.split(java.util.regex.Pattern.quote(s"pg_vis(${escape(VisCol)}")).length - 1 mustEqual 4
     }
 
     "not add a pg_vis predicate when there is no _vis column" in {
