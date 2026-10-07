@@ -54,6 +54,25 @@ class PartionedPostgisDialectTest extends SpecificationWithJUnit with Mockito {
       sqlCapture.sql.split(java.util.regex.Pattern.quote(s"pg_vis(${escape(VisCol)}")).length - 1 mustEqual 4
     }
 
+    "configure the visibility decision sidecar and cardinality cap" in {
+      import org.locationtech.geomesa.gt.partition.postgis.dialect.PartitionedPostgisDialect.SftUserData
+
+      val sft = SimpleFeatureTypes.createType("visconfig", s"name:String,dtg:Date,*geom:Point:srid=4326,$VisCol:String")
+      val info = TypeInfo("public", sft)
+      info.tables.visibilityValues.name.raw mustEqual "visconfig_vis_values"
+      SftUserData.VisibilityDecisionArrayMaxValues.get(sft) mustEqual 1024
+
+      sft.getUserData.put(SftUserData.VisibilityDecisionArrayMaxValues.key, "1")
+      SftUserData.VisibilityDecisionArrayMaxValues.get(sft) mustEqual 1
+      TypeInfo("public", sft) must not(throwAn[IllegalArgumentException])
+      val sqlCapture = new SqlCapture()
+      MainView.create(TypeInfo("public", sft))(sqlCapture)
+      sqlCapture.sql must contain("count <= 1")
+
+      sft.getUserData.put(SftUserData.VisibilityDecisionArrayMaxValues.key, "0")
+      TypeInfo("public", sft) must throwAn[IllegalArgumentException]("Visibility decision array maximum must be positive: 0")
+    }
+
     "not add a pg_vis predicate when there is no _vis column" in {
       val sft = SimpleFeatureTypes.createType("novistest", "name:String,dtg:Date,*geom:Point:srid=4326")
       val info = TypeInfo("public", sft)

@@ -264,10 +264,10 @@ class PartitionedPostgisDataStoreTest extends SpecificationWithJUnit with Before
               FeatureUtils.write(writer, feature, useProvidedFid = true)
             }
           }
-          // validate adding through the feature store
-          ds.getFeatureSource(sft.getTypeName).addFeatures(new ListFeatureCollection(sft, features.drop(5).asJava))
           tx.commit()
         }
+        // validate adding through the feature store
+        ds.getFeatureSource(sft.getTypeName).addFeatures(new ListFeatureCollection(sft, features.drop(5).asJava))
 
         val typeInfo = TypeInfo(this.schema, sft)
         WithClose(ds.getConnection(Transaction.AUTO_COMMIT)) { cx =>
@@ -315,6 +315,12 @@ class PartitionedPostgisDataStoreTest extends SpecificationWithJUnit with Before
               count(cx, typeInfo.tables.spillPartitions)
           partitioned mustEqual 10
         }
+
+        runQueries()
+
+        // reduce the cap below the four sidecar expressions and verify the row-wise fallback remains equivalent
+        sft.getUserData.put(SftUserData.VisibilityDecisionArrayMaxValues.key, "1")
+        ds.upgrade(sft)
 
         runQueries()
 
